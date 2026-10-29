@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --page-bg: #F7F6F2;
+    --surface: #FFFFFF;
+    --border: #E8E6E0;
+    --divider: #F3F1EC;
+    --text-main: #1E2622;
+    --text-muted: #5C6862;
+    --accent-sage: #2F5D50;
+    --accent-sage-hover: #264D42;
+    --accent-tint: #E6EEEA;
+    --status-green: #3F8A6B;
+    --status-blue: #4A6FA5;
+    --status-amber: #C48A2A;
+  }
+
+  * {
+    border-color: #E8E6E0;
+  }
+
+  body {
+    background-color: #F7F6F2;
+    color: #1E2622;
+    font-family: 'DM Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    min-height: 100vh;
+  }
+
+  h1 {
+    font-size: 32px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    line-height: 1.25;
+    color: #1E2622;
+  }
+
+  h2, h3.section-heading {
+    font-size: 18px;
+    font-weight: 600;
+    color: #1E2622;
+  }
+}
+
+/* Subtle scrollbars fitting warm minimal theme */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #F7F6F2;
+}
+::-webkit-scrollbar-thumb {
+  background: #D8D6D0;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #B8B6B0;
+}
