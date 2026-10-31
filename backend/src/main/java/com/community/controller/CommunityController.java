@@ -30,4 +30,9 @@ public class CommunityController {
                 .collect(Collectors.toList());
         return ResponseEntity.ok(list);
     }
+
+    @GetMapping("/public/health")
+    public ResponseEntity<Map<String, String>> healthCheck() {
+        return ResponseEntity.ok(Map.of("status", "UP", "service", "CampusServe Backend"));
+    }
 }
