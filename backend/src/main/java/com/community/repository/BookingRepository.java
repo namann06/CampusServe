@@ -8,6 +8,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface BookingRepository extends JpaRepository<Booking, Long> {
@@ -16,6 +17,16 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
            "JOIN FETCH b.service s " +
            "JOIN FETCH b.resident r " +
            "JOIN FETCH b.provider p " +
+           "JOIN FETCH b.community c " +
+           "LEFT JOIN FETCH b.review rev " +
+           "WHERE b.id = :id")
+    Optional<Booking> findByIdWithDetails(@Param("id") Long id);
+
+    @Query("SELECT b FROM Booking b " +
+           "JOIN FETCH b.service s " +
+           "JOIN FETCH b.resident r " +
+           "JOIN FETCH b.provider p " +
+           "JOIN FETCH b.community c " +
            "LEFT JOIN FETCH b.review rev " +
            "WHERE b.community.id = :communityId " +
            "AND (b.resident.id = :userId OR b.provider.id = :userId) " +
@@ -26,6 +37,7 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
            "JOIN FETCH b.service s " +
            "JOIN FETCH b.resident r " +
            "JOIN FETCH b.provider p " +
+           "JOIN FETCH b.community c " +
            "LEFT JOIN FETCH b.review rev " +
            "WHERE b.community.id = :communityId " +
            "ORDER BY b.createdAt DESC")

@@ -23,6 +23,9 @@ public class UserPrincipal implements UserDetails {
     private final String flatOrRoomNo;
     private final Boolean isPeerProvider;
     private final Collection<? extends GrantedAuthority> authorities;
+    private final String phone;
+    private final Boolean isApproved;
+    private final java.time.LocalDateTime createdAt;
 
     public static UserPrincipal create(User user) {
         SimpleGrantedAuthority authority = new SimpleGrantedAuthority(user.getRole().name());
@@ -35,7 +38,10 @@ public class UserPrincipal implements UserDetails {
                 user.getCommunity().getName(),
                 user.getFlatOrRoomNo(),
                 user.getIsPeerProvider(),
-                Collections.singletonList(authority)
+                Collections.singletonList(authority),
+                user.getPhone(),
+                user.getIsApproved(),
+                user.getCreatedAt()
         );
     }
 

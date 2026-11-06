@@ -5,11 +5,11 @@ import { useNavigate } from 'react-router-dom';
 export const QuickRoleSwitcher = () => {
   const { user, quickLogin, loading } = useAuth();
   const navigate = useNavigate();
-  const [switching, setSwitching] = useState(false);
+  const [switchingRole, setSwitchingRole] = useState(null);
 
   const handleRoleSwitch = async (roleType) => {
     try {
-      setSwitching(true);
+      setSwitchingRole(roleType);
       const loggedUser = await quickLogin(roleType);
       if (loggedUser.role === 'ROLE_ADMIN') {
         navigate('/admin');
@@ -21,7 +21,7 @@ export const QuickRoleSwitcher = () => {
     } catch (err) {
       console.error('Role switch error', err);
     } finally {
-      setSwitching(false);
+      setSwitchingRole(null);
     }
   };
 
@@ -43,50 +43,50 @@ export const QuickRoleSwitcher = () => {
         <div className="flex items-center flex-wrap gap-1.5">
           <button
             onClick={() => handleRoleSwitch('resident')}
-            disabled={loading || switching}
+            disabled={loading || !!switchingRole}
             className={`px-3 py-1 rounded-full text-[12px] font-medium transition-colors cursor-pointer ${
               isCurrent('ROLE_RESIDENT')
                 ? 'bg-[#2F5D50] text-white'
                 : 'bg-white border border-[#E8E6E0] text-[#1E2622] hover:bg-[#E6EEEA]'
             }`}
           >
-            Resident
+            {switchingRole === 'resident' ? 'Switching...' : 'Resident'}
           </button>
 
           <button
             onClick={() => handleRoleSwitch('provider')}
-            disabled={loading || switching}
+            disabled={loading || !!switchingRole}
             className={`px-3 py-1 rounded-full text-[12px] font-medium transition-colors cursor-pointer ${
               isCurrent('ROLE_PROVIDER')
                 ? 'bg-[#2F5D50] text-white'
                 : 'bg-white border border-[#E8E6E0] text-[#1E2622] hover:bg-[#E6EEEA]'
             }`}
           >
-            Provider
+            {switchingRole === 'provider' ? 'Switching...' : 'Provider'}
           </button>
 
           <button
             onClick={() => handleRoleSwitch('peer')}
-            disabled={loading || switching}
+            disabled={loading || !!switchingRole}
             className={`px-3 py-1 rounded-full text-[12px] font-medium transition-colors cursor-pointer ${
               isCurrent('ROLE_RESIDENT', true)
                 ? 'bg-[#2F5D50] text-white'
                 : 'bg-white border border-[#E8E6E0] text-[#1E2622] hover:bg-[#E6EEEA]'
             }`}
           >
-            Peer tutor
+            {switchingRole === 'peer' ? 'Switching...' : 'Peer tutor'}
           </button>
 
           <button
             onClick={() => handleRoleSwitch('admin')}
-            disabled={loading || switching}
+            disabled={loading || !!switchingRole}
             className={`px-3 py-1 rounded-full text-[12px] font-medium transition-colors cursor-pointer ${
               isCurrent('ROLE_ADMIN')
                 ? 'bg-[#2F5D50] text-white'
                 : 'bg-white border border-[#E8E6E0] text-[#1E2622] hover:bg-[#E6EEEA]'
             }`}
           >
-            Admin
+            {switchingRole === 'admin' ? 'Switching...' : 'Admin'}
           </button>
         </div>
       </div>

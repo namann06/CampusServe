@@ -79,7 +79,7 @@ public class ServiceCatalogService {
 
     @Transactional
     public ServiceDto toggleAvailability(UserPrincipal currentUser, Long serviceId) {
-        ServiceEntity service = serviceRepository.findById(serviceId)
+        ServiceEntity service = serviceRepository.findByIdWithDetails(serviceId)
                 .orElseThrow(() -> new AppException("Service not found with id: " + serviceId, HttpStatus.NOT_FOUND));
 
         // BOLA / IDOR ownership validation

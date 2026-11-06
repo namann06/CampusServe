@@ -138,9 +138,9 @@ export const ResidentDashboard = () => {
     try {
       setProcessingId(bookingId);
       setPeerActionMessage({ text: '', type: '' });
-      await client.patch(`/bookings/${bookingId}/accept`);
+      const res = await client.patch(`/bookings/${bookingId}/accept`);
+      setBookings((prev) => prev.map((b) => (b.id === bookingId ? res.data : b)));
       setPeerActionMessage({ text: `Class request #${bookingId} accepted. Awaiting arrival OTP handshake.`, type: 'success' });
-      await fetchBookings();
     } catch (err) {
       setPeerActionMessage({ text: err.response?.data?.message || 'Failed to accept booking', type: 'error' });
     } finally {
@@ -157,10 +157,10 @@ export const ResidentDashboard = () => {
     try {
       setProcessingId(bookingId);
       setOtpErrors((prev) => ({ ...prev, [bookingId]: '' }));
-      await client.patch(`/bookings/${bookingId}/verify-start`, { otp });
+      const res = await client.patch(`/bookings/${bookingId}/verify-start`, { otp });
+      setBookings((prev) => prev.map((b) => (b.id === bookingId ? res.data : b)));
       setPeerActionMessage({ text: `Handshake verified! Class #${bookingId} is now in progress.`, type: 'success' });
       setOtpInputs((prev) => ({ ...prev, [bookingId]: '' }));
-      await fetchBookings();
     } catch (err) {
       const msg = err.response?.data?.message || 'Invalid OTP code';
       setOtpErrors((prev) => ({ ...prev, [bookingId]: msg }));
@@ -173,9 +173,9 @@ export const ResidentDashboard = () => {
     try {
       setProcessingId(bookingId);
       setPeerActionMessage({ text: '', type: '' });
-      await client.patch(`/bookings/${bookingId}/complete`);
+      const res = await client.patch(`/bookings/${bookingId}/complete`);
+      setBookings((prev) => prev.map((b) => (b.id === bookingId ? res.data : b)));
       setPeerActionMessage({ text: `Class #${bookingId} marked as completed.`, type: 'success' });
-      await fetchBookings();
     } catch (err) {
       setPeerActionMessage({ text: err.response?.data?.message || 'Failed to complete booking', type: 'error' });
     } finally {
@@ -209,7 +209,7 @@ export const ResidentDashboard = () => {
         notes: cleanNotes,
       });
       setBookingSuccessOtp(res.data.verificationOtp);
-      fetchBookings();
+      setBookings((prev) => [res.data, ...prev]);
     } catch (err) {
       setBookingError(err.response?.data?.message || 'Failed to place booking');
     } finally {
@@ -230,12 +230,12 @@ export const ResidentDashboard = () => {
     try {
       setSubmittingReview(true);
       setReviewError('');
-      await client.post(`/bookings/${reviewBooking.id}/reviews`, {
+      const res = await client.post(`/bookings/${reviewBooking.id}/reviews`, {
         rating,
         comment: reviewComment,
       });
+      setBookings((prev) => prev.map((b) => (b.id === reviewBooking.id ? { ...b, review: res.data } : b)));
       setReviewBooking(null);
-      fetchBookings();
     } catch (err) {
       setReviewError(err.response?.data?.message || 'Failed to submit review');
     } finally {
@@ -247,7 +247,7 @@ export const ResidentDashboard = () => {
     e.preventDefault();
     try {
       setP2pError('');
-      await client.post('/services', {
+      const res = await client.post('/services', {
         title: p2pTitle,
         category: p2pCategory,
         description: p2pDescription,
@@ -258,8 +258,8 @@ export const ResidentDashboard = () => {
       setP2pTitle('');
       setP2pDescription('');
       setP2pPrice('');
-      fetchMyP2pServices();
-      fetchServices();
+      setMyP2pServices((prev) => [...prev, res.data]);
+      setServices((prev) => [...prev, res.data]);
     } catch (err) {
       setP2pError(err.response?.data?.message || 'Failed to create service');
     }
@@ -267,9 +267,9 @@ export const ResidentDashboard = () => {
 
   const handleToggleAvailability = async (serviceId) => {
     try {
-      await client.patch(`/services/${serviceId}/toggle-availability`);
-      fetchMyP2pServices();
-      fetchServices();
+      const res = await client.patch(`/services/${serviceId}/toggle-availability`);
+      setMyP2pServices((prev) => prev.map((s) => (s.id === serviceId ? res.data : s)));
+      setServices((prev) => prev.map((s) => (s.id === serviceId ? res.data : s)));
     } catch (err) {
       console.error('Error toggling availability', err);
     }

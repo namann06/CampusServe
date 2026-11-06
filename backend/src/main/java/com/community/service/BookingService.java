@@ -198,7 +198,7 @@ public class BookingService {
     }
 
     private Booking findBookingWithOwnershipCheck(Long bookingId, UserPrincipal currentUser) {
-        Booking booking = bookingRepository.findById(bookingId)
+        Booking booking = bookingRepository.findByIdWithDetails(bookingId)
                 .orElseThrow(() -> new AppException("Booking not found with id: " + bookingId, HttpStatus.NOT_FOUND));
 
         // Strict Tenant Isolation

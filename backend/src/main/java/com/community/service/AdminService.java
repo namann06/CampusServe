@@ -66,7 +66,7 @@ public class AdminService {
 
     @Transactional
     public BookingDto overrideBookingStatus(UserPrincipal currentUser, Long bookingId, OverrideStatusRequest request) {
-        Booking booking = bookingRepository.findById(bookingId)
+        Booking booking = bookingRepository.findByIdWithDetails(bookingId)
                 .orElseThrow(() -> new AppException("Booking not found with id: " + bookingId, HttpStatus.NOT_FOUND));
 
         if (!booking.getCommunity().getId().equals(currentUser.getCommunityId())) {
@@ -87,7 +87,7 @@ public class AdminService {
 
     @Transactional(readOnly = true)
     public List<UserDto> getCommunityUsers(UserPrincipal currentUser) {
-        return userRepository.findByCommunityId(currentUser.getCommunityId())
+        return userRepository.findByCommunityIdWithCommunity(currentUser.getCommunityId())
                 .stream()
                 .map(authService::mapToUserDto)
                 .collect(Collectors.toList());

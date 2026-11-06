@@ -7,9 +7,13 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface ServiceRepository extends JpaRepository<ServiceEntity, Long> {
+
+    @Query("SELECT s FROM ServiceEntity s JOIN FETCH s.provider p JOIN FETCH s.community c WHERE s.id = :id")
+    Optional<ServiceEntity> findByIdWithDetails(@Param("id") Long id);
 
     @Query("SELECT s FROM ServiceEntity s JOIN FETCH s.provider p WHERE s.community.id = :communityId AND s.isAvailable = true ORDER BY s.id ASC")
     List<ServiceEntity> findByCommunityIdAndIsAvailableTrue(@Param("communityId") Long communityId);

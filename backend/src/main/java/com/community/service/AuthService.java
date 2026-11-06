@@ -1,5 +1,6 @@
 package com.community.service;
 
+import com.community.config.CustomUserDetailsService;
 import com.community.config.JwtTokenProvider;
 import com.community.config.UserPrincipal;
 import com.community.dto.AuthRequest;
@@ -31,6 +32,7 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final AuthenticationManager authenticationManager;
     private final JwtTokenProvider tokenProvider;
+    private final CustomUserDetailsService userDetailsService;
 
     @Transactional
     public AuthResponse register(RegisterRequest request) {
@@ -69,6 +71,9 @@ public class AuthService {
         SecurityContextHolder.getContext().setAuthentication(authentication);
         String token = tokenProvider.generateToken(authentication);
 
+        UserPrincipal principal = (UserPrincipal) authentication.getPrincipal();
+        userDetailsService.cachePrincipal(principal);
+
         return AuthResponse.builder()
                 .token(token)
                 .tokenType("Bearer")
@@ -89,13 +94,36 @@ public class AuthService {
         String token = tokenProvider.generateToken(authentication);
 
         UserPrincipal principal = (UserPrincipal) authentication.getPrincipal();
-        User user = userRepository.findById(principal.getId())
-                .orElseThrow(() -> new AppException("User not found", HttpStatus.NOT_FOUND));
+        userDetailsService.cachePrincipal(principal);
 
         return AuthResponse.builder()
                 .token(token)
                 .tokenType("Bearer")
-                .user(mapToUserDto(user))
+                .user(mapPrincipalToUserDto(principal))
+                .build();
+    }
+
+    public UserDto mapPrincipalToUserDto(UserPrincipal principal) {
+        Role role = principal.getAuthorities().stream()
+                .findFirst()
+                .map(a -> {
+                    String auth = a.getAuthority();
+                    return auth.startsWith("ROLE_") ? Role.valueOf(auth) : Role.valueOf("ROLE_" + auth);
+                })
+                .orElse(Role.ROLE_RESIDENT);
+
+        return UserDto.builder()
+                .id(principal.getId())
+                .name(principal.getName())
+                .email(principal.getEmail())
+                .phone(principal.getPhone())
+                .flatOrRoomNo(principal.getFlatOrRoomNo())
+                .role(role)
+                .isPeerProvider(principal.getIsPeerProvider())
+                .isApproved(principal.getIsApproved())
+                .communityId(principal.getCommunityId())
+                .communityName(principal.getCommunityName())
+                .createdAt(principal.getCreatedAt())
                 .build();
     }
 

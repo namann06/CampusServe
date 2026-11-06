@@ -13,6 +13,7 @@ export const ProviderDashboard = () => {
   const [otpInputs, setOtpInputs] = useState({});
   const [otpErrors, setOtpErrors] = useState({});
   const [verifyingId, setVerifyingId] = useState(null);
+  const [processingId, setProcessingId] = useState(null);
 
   // Action feedback
   const [actionMessage, setActionMessage] = useState({ text: '', type: '' });
@@ -59,12 +60,15 @@ export const ProviderDashboard = () => {
 
   const handleAccept = async (bookingId) => {
     try {
+      setProcessingId(bookingId);
       setActionMessage({ text: '', type: '' });
-      await client.patch(`/bookings/${bookingId}/accept`);
+      const res = await client.patch(`/bookings/${bookingId}/accept`);
+      setBookings((prev) => prev.map((b) => (b.id === bookingId ? res.data : b)));
       setActionMessage({ text: `Booking #${bookingId} accepted. Ready for physical OTP handshake.`, type: 'success' });
-      fetchData();
     } catch (err) {
       setActionMessage({ text: err.response?.data?.message || 'Failed to accept booking', type: 'error' });
+    } finally {
+      setProcessingId(null);
     }
   };
 
@@ -78,10 +82,10 @@ export const ProviderDashboard = () => {
     try {
       setVerifyingId(bookingId);
       setOtpErrors({ ...otpErrors, [bookingId]: '' });
-      await client.patch(`/bookings/${bookingId}/verify-start`, { otp });
+      const res = await client.patch(`/bookings/${bookingId}/verify-start`, { otp });
+      setBookings((prev) => prev.map((b) => (b.id === bookingId ? res.data : b)));
       setActionMessage({ text: `Handshake verified! Job #${bookingId} is now in progress.`, type: 'success' });
       setOtpInputs({ ...otpInputs, [bookingId]: '' });
-      fetchData();
     } catch (err) {
       const msg = err.response?.data?.message || 'Invalid OTP code';
       setOtpErrors({ ...otpErrors, [bookingId]: msg });
@@ -92,19 +96,22 @@ export const ProviderDashboard = () => {
 
   const handleComplete = async (bookingId) => {
     try {
+      setProcessingId(bookingId);
       setActionMessage({ text: '', type: '' });
-      await client.patch(`/bookings/${bookingId}/complete`);
+      const res = await client.patch(`/bookings/${bookingId}/complete`);
+      setBookings((prev) => prev.map((b) => (b.id === bookingId ? res.data : b)));
       setActionMessage({ text: `Job #${bookingId} marked as completed.`, type: 'success' });
-      fetchData();
     } catch (err) {
       setActionMessage({ text: err.response?.data?.message || 'Failed to complete job', type: 'error' });
+    } finally {
+      setProcessingId(null);
     }
   };
 
   const handleToggleService = async (serviceId) => {
     try {
-      await client.patch(`/services/${serviceId}/toggle-availability`);
-      fetchData();
+      const res = await client.patch(`/services/${serviceId}/toggle-availability`);
+      setMyServices((prev) => prev.map((s) => (s.id === serviceId ? res.data : s)));
     } catch (err) {
       console.error('Failed to toggle service', err);
     }
@@ -114,18 +121,18 @@ export const ProviderDashboard = () => {
     e.preventDefault();
     try {
       setServiceError('');
-      await client.post('/services', {
+      const res = await client.post('/services', {
         title: serviceTitle,
         category: serviceCategory,
         description: serviceDescription,
         basePrice: parseFloat(servicePrice),
         isAvailable: true,
       });
+      setMyServices((prev) => [...prev, res.data]);
       setShowAddServiceModal(false);
       setServiceTitle('');
       setServiceDescription('');
       setServicePrice('');
-      fetchData();
     } catch (err) {
       setServiceError(err.response?.data?.message || 'Failed to add service');
     }
@@ -257,9 +264,10 @@ export const ProviderDashboard = () => {
                     </div>
                     <button
                       onClick={() => handleAccept(b.id)}
-                      className="min-h-[44px] h-[44px] px-6 rounded-[10px] bg-[#2F5D50] hover:bg-[#264D42] text-white text-[14px] font-medium transition-colors cursor-pointer"
+                      disabled={processingId === b.id}
+                      className="min-h-[44px] h-[44px] px-6 rounded-[10px] bg-[#2F5D50] hover:bg-[#264D42] text-white text-[14px] font-medium transition-colors cursor-pointer disabled:opacity-50"
                     >
-                      Accept job
+                      {processingId === b.id ? 'Accepting...' : 'Accept job'}
                     </button>
                   </div>
                 </div>
@@ -364,9 +372,10 @@ export const ProviderDashboard = () => {
 
                   <button
                     onClick={() => handleComplete(b.id)}
-                    className="min-h-[44px] h-[44px] px-6 rounded-[10px] bg-[#2F5D50] hover:bg-[#264D42] text-white text-[14px] font-medium transition-colors cursor-pointer shrink-0"
+                    disabled={processingId === b.id}
+                    className="min-h-[44px] h-[44px] px-6 rounded-[10px] bg-[#2F5D50] hover:bg-[#264D42] text-white text-[14px] font-medium transition-colors cursor-pointer shrink-0 disabled:opacity-50"
                   >
-                    Mark completed
+                    {processingId === b.id ? 'Completing...' : 'Mark completed'}
                   </button>
                 </div>
               ))}
