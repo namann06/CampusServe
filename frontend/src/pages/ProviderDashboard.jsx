@@ -51,7 +51,7 @@ export const ProviderDashboard = () => {
         client.get('/bookings/my-bookings'),
         client.get('/services/my-services'),
       ]);
-      setBookings(bookingsRes.data);
+      setBookings(bookingsRes.data.filter((b) => b.providerId === user?.id));
       setMyServices(servicesRes.data);
     } catch (err) {
       console.error('Error loading provider data', err);
@@ -161,7 +161,9 @@ export const ProviderDashboard = () => {
             {getGreeting()}, {providerFirstName}
           </h1>
           <p className="text-[15px] text-[#5C6862] mt-1">
-            Handy electrician & plumber. Manage jobs and verify handshakes with residents.
+            {user?.isPeerProvider
+              ? 'Peer tutor & skills provider. Manage tutoring requests and verify handshakes with students.'
+              : 'Handy electrician & plumber. Manage jobs and verify handshakes with residents.'}
           </p>
         </div>
 

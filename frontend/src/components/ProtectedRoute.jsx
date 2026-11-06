@@ -18,6 +18,10 @@ export const ProtectedRoute = ({ children, allowedRoles }) => {
   }
 
   if (allowedRoles && !allowedRoles.includes(user.role)) {
+    // Peer providers (resident + isPeerProvider) have dual capability to view the provider dashboard
+    if (user.isPeerProvider && allowedRoles.includes('ROLE_PROVIDER')) {
+      return children;
+    }
     // If provider tries to view resident dashboard or vice versa, redirect to their role home
     if (user.role === 'ROLE_ADMIN') return <Navigate to="/admin" replace />;
     if (user.role === 'ROLE_PROVIDER') return <Navigate to="/provider" replace />;

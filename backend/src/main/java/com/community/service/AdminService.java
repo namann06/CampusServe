@@ -87,9 +87,8 @@ public class AdminService {
 
     @Transactional(readOnly = true)
     public List<UserDto> getCommunityUsers(UserPrincipal currentUser) {
-        return userRepository.findAll()
+        return userRepository.findByCommunityId(currentUser.getCommunityId())
                 .stream()
-                .filter(u -> u.getCommunity().getId().equals(currentUser.getCommunityId()))
                 .map(authService::mapToUserDto)
                 .collect(Collectors.toList());
     }

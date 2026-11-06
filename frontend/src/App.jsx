@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import client from './api/client';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Header } from './components/Header';
 import { QuickRoleSwitcher } from './components/QuickRoleSwitcher';
@@ -24,6 +25,11 @@ const RootRedirect = () => {
 };
 
 function App() {
+  useEffect(() => {
+    // Keep-warm pre-fetch ping: wakes up cloud server & initializes connection pool
+    client.get('/communities/public/health').catch(() => {});
+  }, []);
+
   return (
     <BrowserRouter>
       <AuthProvider>

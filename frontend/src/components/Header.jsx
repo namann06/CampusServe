@@ -1,10 +1,11 @@
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 
 export const Header = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const handleLogout = () => {
     logout();
@@ -59,6 +60,15 @@ export const Header = () => {
                     {getRoleDisplay(user)}
                   </div>
                 </div>
+
+                {user.isPeerProvider && (
+                  <Link
+                    to={location.pathname === '/provider' ? '/dashboard' : '/provider'}
+                    className="hidden sm:inline-flex items-center gap-1.5 border border-[#2F5D50] text-[#2F5D50] bg-[#E6EEEA] hover:bg-[#d5e2dc] px-3 py-1.5 rounded-[8px] text-[12px] font-medium transition-colors"
+                  >
+                    <span>{location.pathname === '/provider' ? 'Switch to Resident View' : 'Switch to Provider View'}</span>
+                  </Link>
+                )}
 
                 <button
                   onClick={handleLogout}

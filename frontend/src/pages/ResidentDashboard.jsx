@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import client from '../api/client';
 import { Modal } from '../components/Modal';
@@ -8,15 +8,22 @@ export const ResidentDashboard = () => {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('catalog'); // 'catalog' | 'bookings' | 'p2p'
   
-  // Catalog state
+  // Catalog state - cached in memory for instantaneous 0ms filtering
   const [services, setServices] = useState([]);
   const [categories] = useState(['All', 'Electrical', 'Plumbing', 'Peer tutoring', 'Cleaning']);
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [loadingServices, setLoadingServices] = useState(false);
 
-  // Bookings state
+  // Bookings state - stores all community bookings for this user (both placed & received)
   const [bookings, setBookings] = useState([]);
   const [loadingBookings, setLoadingBookings] = useState(false);
+  const [bookingSubTab, setBookingSubTab] = useState('received'); // 'received' | 'booked_by_me'
+
+  // Peer Provider Action States
+  const [otpInputs, setOtpInputs] = useState({});
+  const [otpErrors, setOtpErrors] = useState({});
+  const [processingId, setProcessingId] = useState(null);
+  const [peerActionMessage, setPeerActionMessage] = useState({ text: '', type: '' });
 
   // Booking Modal
   const [selectedService, setSelectedService] = useState(null);
@@ -41,13 +48,14 @@ export const ResidentDashboard = () => {
   const [p2pPrice, setP2pPrice] = useState('');
   const [p2pError, setP2pError] = useState('');
 
+  // Initial mount: load catalog, bookings, and p2p services once in parallel
   useEffect(() => {
-    fetchServices(selectedCategory);
+    fetchServices();
     fetchBookings();
     if (user?.isPeerProvider) {
       fetchMyP2pServices();
     }
-  }, [selectedCategory]);
+  }, []);
 
   const cleanName = (name) => {
     if (!name) return '';
@@ -61,14 +69,41 @@ export const ResidentDashboard = () => {
     return (parts[0]?.[0] || 'C').toUpperCase();
   };
 
-  const fetchServices = async (category) => {
+  // Instant in-memory category filtering: 0ms latency, eliminates redundant network calls
+  const displayedServices = useMemo(() => {
+    if (!selectedCategory || selectedCategory === 'All') return services;
+    const target = selectedCategory.toLowerCase().replace(/\s+/g, '');
+    return services.filter((s) => s.category?.toLowerCase().replace(/\s+/g, '') === target);
+  }, [services, selectedCategory]);
+
+  // Split bookings between services booked by this resident vs requests received for their peer services
+  const myBookedServices = useMemo(() => {
+    return bookings.filter((b) => b.residentId === user?.id);
+  }, [bookings, user?.id]);
+
+  const receivedRequests = useMemo(() => {
+    return bookings.filter((b) => b.providerId === user?.id);
+  }, [bookings, user?.id]);
+
+  const totalBookingsCount = user?.isPeerProvider
+    ? receivedRequests.length + myBookedServices.length
+    : myBookedServices.length;
+
+  // Auto-select the appropriate sub-tab based on incoming vs outgoing bookings
+  useEffect(() => {
+    if (user?.isPeerProvider) {
+      if (receivedRequests.length > 0 && myBookedServices.length === 0) {
+        setBookingSubTab('received');
+      } else if (receivedRequests.length === 0 && myBookedServices.length > 0) {
+        setBookingSubTab('booked_by_me');
+      }
+    }
+  }, [user?.isPeerProvider, receivedRequests.length, myBookedServices.length]);
+
+  const fetchServices = async () => {
     try {
       setLoadingServices(true);
-      // Map display category to backend if needed
-      let param = category;
-      if (category === 'Peer tutoring') param = 'Peer Tutoring';
-      const url = param && param !== 'All' ? `/services?category=${encodeURIComponent(param)}` : '/services';
-      const res = await client.get(url);
+      const res = await client.get('/services');
       setServices(res.data);
     } catch (err) {
       console.error('Error fetching services', err);
@@ -81,7 +116,7 @@ export const ResidentDashboard = () => {
     try {
       setLoadingBookings(true);
       const res = await client.get('/bookings/my-bookings');
-      setBookings(res.data.filter((b) => b.residentId === user?.id));
+      setBookings(res.data);
     } catch (err) {
       console.error('Error fetching bookings', err);
     } finally {
@@ -95,6 +130,56 @@ export const ResidentDashboard = () => {
       setMyP2pServices(res.data);
     } catch (err) {
       console.error('Error fetching P2P services', err);
+    }
+  };
+
+  // Peer Provider Action Handlers
+  const handleAcceptBooking = async (bookingId) => {
+    try {
+      setProcessingId(bookingId);
+      setPeerActionMessage({ text: '', type: '' });
+      await client.patch(`/bookings/${bookingId}/accept`);
+      setPeerActionMessage({ text: `Class request #${bookingId} accepted. Awaiting arrival OTP handshake.`, type: 'success' });
+      await fetchBookings();
+    } catch (err) {
+      setPeerActionMessage({ text: err.response?.data?.message || 'Failed to accept booking', type: 'error' });
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const handleVerifyStart = async (bookingId) => {
+    const otp = otpInputs[bookingId] || '';
+    if (!otp || otp.length !== 4) {
+      setOtpErrors((prev) => ({ ...prev, [bookingId]: 'Please enter the exact 4-digit handshake code' }));
+      return;
+    }
+    try {
+      setProcessingId(bookingId);
+      setOtpErrors((prev) => ({ ...prev, [bookingId]: '' }));
+      await client.patch(`/bookings/${bookingId}/verify-start`, { otp });
+      setPeerActionMessage({ text: `Handshake verified! Class #${bookingId} is now in progress.`, type: 'success' });
+      setOtpInputs((prev) => ({ ...prev, [bookingId]: '' }));
+      await fetchBookings();
+    } catch (err) {
+      const msg = err.response?.data?.message || 'Invalid OTP code';
+      setOtpErrors((prev) => ({ ...prev, [bookingId]: msg }));
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const handleCompleteBooking = async (bookingId) => {
+    try {
+      setProcessingId(bookingId);
+      setPeerActionMessage({ text: '', type: '' });
+      await client.patch(`/bookings/${bookingId}/complete`);
+      setPeerActionMessage({ text: `Class #${bookingId} marked as completed.`, type: 'success' });
+      await fetchBookings();
+    } catch (err) {
+      setPeerActionMessage({ text: err.response?.data?.message || 'Failed to complete booking', type: 'error' });
+    } finally {
+      setProcessingId(null);
     }
   };
 
@@ -174,7 +259,7 @@ export const ResidentDashboard = () => {
       setP2pDescription('');
       setP2pPrice('');
       fetchMyP2pServices();
-      fetchServices(selectedCategory);
+      fetchServices();
     } catch (err) {
       setP2pError(err.response?.data?.message || 'Failed to create service');
     }
@@ -184,7 +269,7 @@ export const ResidentDashboard = () => {
     try {
       await client.patch(`/services/${serviceId}/toggle-availability`);
       fetchMyP2pServices();
-      fetchServices(selectedCategory);
+      fetchServices();
     } catch (err) {
       console.error('Error toggling availability', err);
     }
@@ -268,9 +353,9 @@ export const ResidentDashboard = () => {
           }`}
         >
           <span>My bookings</span>
-          {bookings.length > 0 && (
-            <span className="text-[12px] text-[#5C6862] font-normal">
-              {bookings.length}
+          {totalBookingsCount > 0 && (
+            <span className="text-[12px] bg-[#E6EEEA] text-[#2F5D50] font-semibold px-2 py-0.5 rounded-full">
+              {totalBookingsCount}
             </span>
           )}
         </button>
@@ -319,13 +404,13 @@ export const ResidentDashboard = () => {
             <div className="bg-white border border-[#E8E6E0] rounded-[14px] p-12 text-center text-[#5C6862] text-[14px]">
               Loading community services...
             </div>
-          ) : services.length === 0 ? (
+          ) : displayedServices.length === 0 ? (
             <div className="bg-white border border-[#E8E6E0] rounded-[14px] p-12 text-center text-[#5C6862] text-[14px]">
               No services found under {selectedCategory}.
             </div>
           ) : (
             <div className="bg-white border border-[#E8E6E0] rounded-[14px] divide-y divide-[#F3F1EC] overflow-hidden">
-              {services.map((service) => (
+              {displayedServices.map((service) => (
                 <div
                   key={service.id}
                   className="p-6 flex flex-col md:flex-row md:items-center justify-between gap-6"
@@ -382,114 +467,340 @@ export const ResidentDashboard = () => {
       {/* TAB 2: MY BOOKINGS */}
       {activeTab === 'bookings' && (
         <div className="space-y-6">
-          <div className="flex items-center justify-between">
-            <h2 className="text-[18px] font-semibold text-[#1E2622]">
-              Your bookings
-            </h2>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h2 className="text-[18px] font-semibold text-[#1E2622]">
+                {user?.isPeerProvider ? 'Bookings & Tutoring Requests' : 'Your bookings'}
+              </h2>
+              <p className="text-[13px] text-[#5C6862] mt-0.5">
+                {user?.isPeerProvider
+                  ? 'Manage requests received for your skills and classes you have booked'
+                  : 'Track your scheduled campus services and physical arrival handshake codes'}
+              </p>
+            </div>
             <button
               onClick={fetchBookings}
-              className="text-[#2F5D50] hover:underline text-[13px] font-medium cursor-pointer"
+              className="text-[#2F5D50] hover:underline text-[13px] font-medium cursor-pointer self-start sm:self-auto"
             >
               Refresh
             </button>
           </div>
 
-          {loadingBookings ? (
-            <div className="bg-white border border-[#E8E6E0] rounded-[14px] p-12 text-center text-[#5C6862] text-[14px]">
-              Loading your bookings...
+          {/* Peer Action Feedback Notification */}
+          {peerActionMessage.text && (
+            <div className="p-3.5 rounded-[10px] bg-white border border-[#E8E6E0] text-[13px] text-[#1E2622] flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span
+                  className={`w-2 h-2 rounded-full shrink-0 ${
+                    peerActionMessage.type === 'success' ? 'bg-[#3F8A6B]' : 'bg-[#C48A2A]'
+                  }`}
+                />
+                <span>{peerActionMessage.text}</span>
+              </div>
+              <button
+                onClick={() => setPeerActionMessage({ text: '', type: '' })}
+                className="text-[#5C6862] hover:text-[#1E2622] text-[13px] cursor-pointer ml-4"
+              >
+                Dismiss
+              </button>
             </div>
-          ) : bookings.length === 0 ? (
-            <div className="bg-white border border-[#E8E6E0] rounded-[14px] p-12 text-center text-[#5C6862] text-[14px]">
-              No bookings yet. Browse the services tab to schedule trusted campus help.
+          )}
+
+          {/* Peer Provider Sub-navigation Pills */}
+          {user?.isPeerProvider && (
+            <div className="flex items-center gap-2 border-b border-[#E8E6E0] pb-2">
+              <button
+                onClick={() => setBookingSubTab('received')}
+                className={`px-3.5 py-1.5 rounded-full text-[13px] font-medium transition-colors cursor-pointer flex items-center gap-1.5 ${
+                  bookingSubTab === 'received'
+                    ? 'bg-[#2F5D50] text-white'
+                    : 'bg-white border border-[#E8E6E0] text-[#1E2622] hover:bg-[#F7F6F2]'
+                }`}
+              >
+                <span>Requests received</span>
+                {receivedRequests.length > 0 && (
+                  <span
+                    className={`text-[11px] px-1.5 py-0.2 rounded-full font-semibold ${
+                      bookingSubTab === 'received' ? 'bg-white/20 text-white' : 'bg-[#E6EEEA] text-[#2F5D50]'
+                    }`}
+                  >
+                    {receivedRequests.length}
+                  </span>
+                )}
+              </button>
+
+              <button
+                onClick={() => setBookingSubTab('booked_by_me')}
+                className={`px-3.5 py-1.5 rounded-full text-[13px] font-medium transition-colors cursor-pointer flex items-center gap-1.5 ${
+                  bookingSubTab === 'booked_by_me'
+                    ? 'bg-[#2F5D50] text-white'
+                    : 'bg-white border border-[#E8E6E0] text-[#1E2622] hover:bg-[#F7F6F2]'
+                }`}
+              >
+                <span>Booked by me</span>
+                {myBookedServices.length > 0 && (
+                  <span
+                    className={`text-[11px] px-1.5 py-0.2 rounded-full font-semibold ${
+                      bookingSubTab === 'booked_by_me' ? 'bg-white/20 text-white' : 'bg-[#E6EEEA] text-[#2F5D50]'
+                    }`}
+                  >
+                    {myBookedServices.length}
+                  </span>
+                )}
+              </button>
             </div>
-          ) : (
-            <div className="bg-white border border-[#E8E6E0] rounded-[14px] divide-y divide-[#F3F1EC] overflow-hidden">
-              {bookings.map((booking) => (
-                <div key={booking.id} className="p-6 space-y-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div>
-                      <div className="text-[12px] text-[#5C6862]">
-                        Ref #{booking.id} · {booking.serviceCategory}
-                      </div>
-                      <div className="text-[16px] font-semibold text-[#1E2622] mt-0.5">
-                        {booking.serviceTitle}
-                      </div>
-                    </div>
-                    <div>{renderStatus(booking.status)}</div>
-                  </div>
+          )}
 
-                  <div className="text-[14px] text-[#5C6862] flex flex-wrap items-center gap-x-6 gap-y-1">
-                    <span>
-                      Provider: <strong className="font-medium text-[#1E2622]">{cleanName(booking.providerName)}</strong>
-                    </span>
-                    <span>
-                      Unit: <span className="text-[#1E2622]">{booking.providerFlat}</span>
-                    </span>
-                    {booking.providerPhone && (
-                      <span>Phone: <span className="text-[#1E2622]">{booking.providerPhone}</span></span>
-                    )}
-                    <span>
-                      Fee: <strong className="font-semibold text-[#1E2622]">₹{booking.basePrice}</strong>
-                    </span>
-                  </div>
-
-                  {booking.notes && (
-                    <div className="text-[13px] text-[#5C6862] bg-[#F7F6F2] p-3 rounded-[8px] border border-[#E8E6E0]">
-                      <span className="font-medium text-[#1E2622]">Note:</span> {booking.notes}
-                    </div>
-                  )}
-
-                  {/* Handshake OTP for requested / accepted bookings */}
-                  {(booking.status === 'REQUESTED' || booking.status === 'ACCEPTED') && (
-                    <div className="bg-[#E6EEEA] border border-[#E8E6E0] rounded-[10px] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <div>
-                        <div className="text-[13px] font-medium text-[#1E2622]">
-                          Handshake verification code
+          {/* VIEW A: PEER TUTOR / PROVIDER REQUESTS RECEIVED */}
+          {user?.isPeerProvider && bookingSubTab === 'received' && (
+            <div>
+              {loadingBookings ? (
+                <div className="bg-white border border-[#E8E6E0] rounded-[14px] p-12 text-center text-[#5C6862] text-[14px]">
+                  Loading received requests...
+                </div>
+              ) : receivedRequests.length === 0 ? (
+                <div className="bg-white border border-[#E8E6E0] rounded-[14px] p-12 text-center text-[#5C6862] text-[14px]">
+                  No incoming booking requests yet. When students or residents book your listed services, they will appear here.
+                </div>
+              ) : (
+                <div className="bg-white border border-[#E8E6E0] rounded-[14px] divide-y divide-[#F3F1EC] overflow-hidden">
+                  {receivedRequests.map((booking) => (
+                    <div key={booking.id} className="p-6 space-y-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div>
+                          <div className="text-[12px] text-[#5C6862]">
+                            Ref #{booking.id} · {booking.serviceCategory}
+                          </div>
+                          <div className="text-[16px] font-semibold text-[#1E2622] mt-0.5">
+                            {booking.serviceTitle}
+                          </div>
                         </div>
-                        <div className="text-[12px] text-[#5C6862] mt-0.5">
-                          Share this 4-digit code with {cleanName(booking.providerName)} upon arrival to start work.
-                        </div>
+                        <div>{renderStatus(booking.status)}</div>
                       </div>
-                      <div className="bg-white border border-[#E8E6E0] rounded-[8px] px-4 py-2 text-center shrink-0">
-                        <span className="text-[20px] font-semibold text-[#1E2622] tracking-widest">
-                          {booking.verificationOtp}
+
+                      <div className="text-[14px] text-[#5C6862] flex flex-wrap items-center gap-x-6 gap-y-1">
+                        <span>
+                          Student: <strong className="font-medium text-[#1E2622]">{cleanName(booking.residentName)}</strong>
+                        </span>
+                        <span>
+                          Unit: <span className="text-[#1E2622]">{booking.residentFlat}</span>
+                        </span>
+                        {booking.residentPhone && (
+                          <span>Phone: <span className="text-[#1E2622]">{booking.residentPhone}</span></span>
+                        )}
+                        <span>
+                          Session fee: <strong className="font-semibold text-[#1E2622]">₹{booking.basePrice}</strong>
                         </span>
                       </div>
-                    </div>
-                  )}
 
-                  {booking.status === 'IN_PROGRESS' && (
-                    <div className="text-[13px] text-[#5C6862] flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-[#4A6FA5]" />
-                      <span>Work is currently underway.</span>
-                    </div>
-                  )}
-
-                  {/* Reviews if Completed */}
-                  {booking.status === 'COMPLETED' && (
-                    <div className="pt-2 flex items-center justify-between gap-4">
-                      {booking.review ? (
-                        <div className="text-[13px] text-[#5C6862] flex items-center gap-2">
-                          <span className="font-medium text-[#1E2622]">★ {booking.review.rating}.0</span>
-                          {booking.review.comment && (
-                            <span>· "{booking.review.comment}"</span>
-                          )}
+                      {booking.notes && (
+                        <div className="text-[13px] text-[#5C6862] bg-[#F7F6F2] p-3 rounded-[8px] border border-[#E8E6E0]">
+                          <span className="font-medium text-[#1E2622]">Student note:</span> {booking.notes}
                         </div>
-                      ) : (
-                        <button
-                          onClick={() => handleOpenReviewModal(booking)}
-                          className="bg-white border border-[#E8E6E0] hover:bg-[#F7F6F2] text-[#1E2622] rounded-[8px] px-3.5 py-1.5 text-[13px] font-medium transition-colors cursor-pointer"
-                        >
-                          Leave review
-                        </button>
                       )}
-                      <span className="text-[12px] text-[#5C6862] ml-auto">
-                        {booking.completedAt ? new Date(booking.completedAt).toLocaleDateString() : 'Completed'}
-                      </span>
+
+                      {/* State 1: REQUESTED -> Peer Tutor can Accept */}
+                      {booking.status === 'REQUESTED' && (
+                        <div className="bg-[#FAF9F5] border border-[#E8E6E0] rounded-[10px] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div className="text-[13px] text-[#5C6862]">
+                            <strong className="text-[#1E2622] font-medium">{cleanName(booking.residentName)}</strong> has requested this class. Accept to confirm your availability.
+                          </div>
+                          <button
+                            onClick={() => handleAcceptBooking(booking.id)}
+                            disabled={processingId === booking.id}
+                            className="bg-[#2F5D50] hover:bg-[#264D42] text-white rounded-[8px] px-4 py-2 text-[13px] font-medium transition-colors cursor-pointer shrink-0"
+                          >
+                            {processingId === booking.id ? 'Accepting...' : 'Accept Request'}
+                          </button>
+                        </div>
+                      )}
+
+                      {/* State 2: ACCEPTED -> Peer Tutor arrives at resident and verifies Handshake OTP */}
+                      {booking.status === 'ACCEPTED' && (
+                        <div className="bg-[#E6EEEA] border border-[#E8E6E0] rounded-[10px] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div>
+                            <div className="text-[13px] font-medium text-[#1E2622]">
+                              Verify Physical Handshake OTP
+                            </div>
+                            <div className="text-[12px] text-[#5C6862] mt-0.5">
+                              Ask {cleanName(booking.residentName)} at {booking.residentFlat} for the 4-digit code displayed on their portal.
+                            </div>
+                            {otpErrors[booking.id] && (
+                              <div className="text-[12px] text-rose-700 font-medium mt-1">
+                                {otpErrors[booking.id]}
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <input
+                              type="text"
+                              maxLength={4}
+                              placeholder="4-digit OTP"
+                              value={otpInputs[booking.id] || ''}
+                              onChange={(e) =>
+                                setOtpInputs({
+                                  ...otpInputs,
+                                  [booking.id]: e.target.value.replace(/\D/g, ''),
+                                })
+                              }
+                              className="w-28 text-center text-[18px] tracking-widest font-semibold bg-white border border-[#E8E6E0] rounded-[8px] px-2 py-1.5 focus:outline-none focus:border-[#2F5D50]"
+                            />
+                            <button
+                              onClick={() => handleVerifyStart(booking.id)}
+                              disabled={processingId === booking.id || (otpInputs[booking.id] || '').length !== 4}
+                              className="bg-[#2F5D50] hover:bg-[#264D42] text-white disabled:bg-[#E8E6E0] disabled:text-[#5C6862] rounded-[8px] px-4 py-2 text-[13px] font-medium transition-colors cursor-pointer"
+                            >
+                              {processingId === booking.id ? 'Verifying...' : 'Verify & Start'}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* State 3: IN_PROGRESS -> Peer Tutor conducts class and marks complete */}
+                      {booking.status === 'IN_PROGRESS' && (
+                        <div className="bg-[#FAF9F5] border border-[#E8E6E0] rounded-[10px] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div className="text-[13px] text-[#5C6862] flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-[#4A6FA5]" />
+                            <span>Tutoring session is currently underway.</span>
+                          </div>
+                          <button
+                            onClick={() => handleCompleteBooking(booking.id)}
+                            disabled={processingId === booking.id}
+                            className="bg-[#2F5D50] hover:bg-[#264D42] text-white rounded-[8px] px-4 py-2 text-[13px] font-medium transition-colors cursor-pointer shrink-0"
+                          >
+                            {processingId === booking.id ? 'Completing...' : 'Complete Session'}
+                          </button>
+                        </div>
+                      )}
+
+                      {/* State 4: COMPLETED -> Shows rating/review received */}
+                      {booking.status === 'COMPLETED' && (
+                        <div className="pt-2 flex items-center justify-between gap-4">
+                          {booking.review ? (
+                            <div className="text-[13px] text-[#5C6862] flex items-center gap-2">
+                              <span className="font-medium text-[#1E2622]">★ {booking.review.rating}.0</span>
+                              {booking.review.comment && (
+                                <span>· "{booking.review.comment}"</span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-[13px] text-[#5C6862]">
+                              Session finished · Awaiting student feedback
+                            </span>
+                          )}
+                          <span className="text-[12px] text-[#5C6862] ml-auto">
+                            {booking.completedAt ? new Date(booking.completedAt).toLocaleDateString() : 'Completed'}
+                          </span>
+                        </div>
+                      )}
                     </div>
-                  )}
+                  ))}
                 </div>
-              ))}
+              )}
+            </div>
+          )}
+
+          {/* VIEW B: SERVICES BOOKED BY THIS RESIDENT */}
+          {(!user?.isPeerProvider || bookingSubTab === 'booked_by_me') && (
+            <div>
+              {loadingBookings ? (
+                <div className="bg-white border border-[#E8E6E0] rounded-[14px] p-12 text-center text-[#5C6862] text-[14px]">
+                  Loading your bookings...
+                </div>
+              ) : myBookedServices.length === 0 ? (
+                <div className="bg-white border border-[#E8E6E0] rounded-[14px] p-12 text-center text-[#5C6862] text-[14px]">
+                  No bookings yet. Browse the services tab to schedule trusted campus help.
+                </div>
+              ) : (
+                <div className="bg-white border border-[#E8E6E0] rounded-[14px] divide-y divide-[#F3F1EC] overflow-hidden">
+                  {myBookedServices.map((booking) => (
+                    <div key={booking.id} className="p-6 space-y-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div>
+                          <div className="text-[12px] text-[#5C6862]">
+                            Ref #{booking.id} · {booking.serviceCategory}
+                          </div>
+                          <div className="text-[16px] font-semibold text-[#1E2622] mt-0.5">
+                            {booking.serviceTitle}
+                          </div>
+                        </div>
+                        <div>{renderStatus(booking.status)}</div>
+                      </div>
+
+                      <div className="text-[14px] text-[#5C6862] flex flex-wrap items-center gap-x-6 gap-y-1">
+                        <span>
+                          Provider: <strong className="font-medium text-[#1E2622]">{cleanName(booking.providerName)}</strong>
+                        </span>
+                        <span>
+                          Unit: <span className="text-[#1E2622]">{booking.providerFlat}</span>
+                        </span>
+                        {booking.providerPhone && (
+                          <span>Phone: <span className="text-[#1E2622]">{booking.providerPhone}</span></span>
+                        )}
+                        <span>
+                          Fee: <strong className="font-semibold text-[#1E2622]">₹{booking.basePrice}</strong>
+                        </span>
+                      </div>
+
+                      {booking.notes && (
+                        <div className="text-[13px] text-[#5C6862] bg-[#F7F6F2] p-3 rounded-[8px] border border-[#E8E6E0]">
+                          <span className="font-medium text-[#1E2622]">Note:</span> {booking.notes}
+                        </div>
+                      )}
+
+                      {/* Handshake OTP for requested / accepted bookings */}
+                      {(booking.status === 'REQUESTED' || booking.status === 'ACCEPTED') && (
+                        <div className="bg-[#E6EEEA] border border-[#E8E6E0] rounded-[10px] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div>
+                            <div className="text-[13px] font-medium text-[#1E2622]">
+                              Handshake verification code
+                            </div>
+                            <div className="text-[12px] text-[#5C6862] mt-0.5">
+                              Share this 4-digit code with {cleanName(booking.providerName)} upon arrival to start work.
+                            </div>
+                          </div>
+                          <div className="bg-white border border-[#E8E6E0] rounded-[8px] px-4 py-2 text-center shrink-0">
+                            <span className="text-[20px] font-semibold text-[#1E2622] tracking-widest">
+                              {booking.verificationOtp}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
+                      {booking.status === 'IN_PROGRESS' && (
+                        <div className="text-[13px] text-[#5C6862] flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-[#4A6FA5]" />
+                          <span>Work is currently underway.</span>
+                        </div>
+                      )}
+
+                      {/* Reviews if Completed */}
+                      {booking.status === 'COMPLETED' && (
+                        <div className="pt-2 flex items-center justify-between gap-4">
+                          {booking.review ? (
+                            <div className="text-[13px] text-[#5C6862] flex items-center gap-2">
+                              <span className="font-medium text-[#1E2622]">★ {booking.review.rating}.0</span>
+                              {booking.review.comment && (
+                                <span>· "{booking.review.comment}"</span>
+                              )}
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => handleOpenReviewModal(booking)}
+                              className="bg-white border border-[#E8E6E0] hover:bg-[#F7F6F2] text-[#1E2622] rounded-[8px] px-3.5 py-1.5 text-[13px] font-medium transition-colors cursor-pointer"
+                            >
+                              Leave review
+                            </button>
+                          )}
+                          <span className="text-[12px] text-[#5C6862] ml-auto">
+                            {booking.completedAt ? new Date(booking.completedAt).toLocaleDateString() : 'Completed'}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
